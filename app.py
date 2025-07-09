@@ -7,7 +7,7 @@ from transformers import pipeline
 @st.cache_resource
 def load_models():
     embedder = SentenceTransformer('all-MiniLM-L6-v2')
-    qa_pipeline = pipeline("question-answering", model="distilbert-base-uncased-distilled-squad")
+    qa_pipeline = pipeline("question-answering", model="deepset/roberta-base-squad2")
     return embedder, qa_pipeline
 
 embedder, qa_pipeline = load_models()
@@ -30,19 +30,19 @@ def embed_chunks(chunks):
     return embedder.encode(chunks, convert_to_tensor=True)
 
 # Semantic search
-def search(query, chunks, chunk_embeddings, top_k=3):
+def search(query, chunks, chunk_embeddings, top_k=5):
     query_embedding = embedder.encode(query, convert_to_tensor=True)
     hits = util.semantic_search(query_embedding, chunk_embeddings, top_k=top_k)
     results = [chunks[hit['corpus_id']] for hit in hits[0]]
     return results
 
-# Answer generation
+# Generate answer using Hugging Face QA pipeline
 def generate_answer(query, context):
     result = qa_pipeline(question=query, context=context)
     return result['answer']
 
 # Streamlit UI
-st.title("📄 Chat with Your PDF (Hugging Face)")
+st.title("📄 ChatPDF AI (Free Hugging Face Models)")
 
 pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
 
@@ -56,8 +56,8 @@ if pdf_file:
 
     query = st.text_input("Ask something about your PDF:")
     if query:
-        top_chunks = search(query, chunks, chunk_embeddings, top_k=3)
-        context = " ".join(top_chunks)
+        top_chunks = search(query, chunks, chunk_embeddings, top_k=5)
+        context = " ".join(top_chunks[:2])  # Use top 2 to stay within model token limit
         answer = generate_answer(query, context)
 
         st.write("### 🔎 Top Relevant Chunks:")
