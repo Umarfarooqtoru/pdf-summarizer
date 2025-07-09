@@ -1,9 +1,18 @@
 import streamlit as st
 import fitz
-from transformers import pipeline
 from sentence_transformers import SentenceTransformer, util
+from transformers import pipeline
 
-# Functions
+# Load models
+@st.cache_resource
+def load_models():
+    embedder = SentenceTransformer('all-MiniLM-L6-v2')
+    qa_pipeline = pipeline("question-answering", model="distilbert-base-uncased-distilled-squad")
+    return embedder, qa_pipeline
+
+embedder, qa_pipeline = load_models()
+
+# Extract PDF text
 def extract_text_from_pdf(pdf_file):
     text = ""
     with fitz.open(stream=pdf_file.read(), filetype="pdf") as pdf:
@@ -11,46 +20,49 @@ def extract_text_from_pdf(pdf_file):
             text += page.get_text()
     return text
 
-@st.cache_resource
-def load_models():
-    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-    embedder = SentenceTransformer('all-MiniLM-L6-v2')
-    return summarizer, embedder
+# Chunk text
+def chunk_text(text, chunk_size=500):
+    words = text.split()
+    return [' '.join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
 
-def summarize_text(text, summarizer, max_chunk=1024):
-    summaries = []
-    for i in range(0, len(text), max_chunk):
-        chunk = text[i:i+max_chunk]
-        summary = summarizer(chunk, max_length=150, min_length=30, do_sample=False)
-        summaries.append(summary[0]['summary_text'])
-    return summaries
+# Embed chunks
+def embed_chunks(chunks):
+    return embedder.encode(chunks, convert_to_tensor=True)
 
-def search_query(query, summaries, embedder, top_k=3):
+# Semantic search
+def search(query, chunks, chunk_embeddings, top_k=3):
     query_embedding = embedder.encode(query, convert_to_tensor=True)
-    summary_embeddings = embedder.encode(summaries, convert_to_tensor=True)
-    
-    hits = util.semantic_search(query_embedding, summary_embeddings, top_k=top_k)
-    results = []
-    for hit in hits[0]:
-        results.append(summaries[hit['corpus_id']])
+    hits = util.semantic_search(query_embedding, chunk_embeddings, top_k=top_k)
+    results = [chunks[hit['corpus_id']] for hit in hits[0]]
     return results
 
+# Answer generation
+def generate_answer(query, context):
+    result = qa_pipeline(question=query, context=context)
+    return result['answer']
+
 # Streamlit UI
-st.title("📄 PDF Search Summarizer")
+st.title("📄 Chat with Your PDF (Hugging Face)")
 
 pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
 
 if pdf_file:
-    summarizer, embedder = load_models()
     text = extract_text_from_pdf(pdf_file)
     st.success("✅ PDF text extracted.")
 
-    summaries = summarize_text(text, summarizer)
-    st.success("✅ Text summarized.")
+    chunks = chunk_text(text)
+    chunk_embeddings = embed_chunks(chunks)
+    st.success("✅ PDF chunks embedded.")
 
-    query = st.text_input("Enter your search query:")
+    query = st.text_input("Ask something about your PDF:")
     if query:
-        results = search_query(query, summaries, embedder)
-        st.write("### 🔎 Search Results:")
-        for r in results:
-            st.write(f"- {r}")
+        top_chunks = search(query, chunks, chunk_embeddings, top_k=3)
+        context = " ".join(top_chunks)
+        answer = generate_answer(query, context)
+
+        st.write("### 🔎 Top Relevant Chunks:")
+        for c in top_chunks:
+            st.write(f"- {c[:300]}...")  # Show snippet
+
+        st.write("### 📝 Answer:")
+        st.write(answer)
