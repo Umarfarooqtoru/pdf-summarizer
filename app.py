@@ -2,26 +2,26 @@ import os
 import requests
 from dotenv import load_dotenv
 import streamlit as st
-import fitz  # PyMuPDF
+import fitz
 from sentence_transformers import SentenceTransformer, util
 
-# 🔷 Load environment variables
+# Load environment variables
 load_dotenv()
 
-# 🔷 First try Streamlit secrets (for Streamlit Cloud), fallback to .env
+# Get Groq API key securely
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 if not GROQ_API_KEY:
     st.error("❌ GROQ_API_KEY not found. Please set it in Streamlit Secrets or .env file.")
     st.stop()
 
-# 🔷 Load embedder model
+# Load embedder model
 @st.cache_resource
 def load_embedder():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
 embedder = load_embedder()
 
-# 🔷 Extract PDF text
+# Extract PDF text
 def extract_text_from_pdf(pdf_file):
     text = ""
     with fitz.open(stream=pdf_file.read(), filetype="pdf") as pdf:
@@ -29,25 +29,25 @@ def extract_text_from_pdf(pdf_file):
             text += page.get_text()
     return text
 
-# 🔷 Chunk text into manageable pieces
+# Chunk text into manageable pieces
 def chunk_text(text, chunk_size=500):
     words = text.split()
     return [' '.join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
 
-# 🔷 Embed chunks
+# Embed chunks
 def embed_chunks(chunks):
     return embedder.encode(chunks, convert_to_tensor=True)
 
-# 🔷 Semantic search for top relevant chunks
+# Semantic search
 def search(query, chunks, chunk_embeddings, top_k=5):
     query_embedding = embedder.encode(query, convert_to_tensor=True)
     hits = util.semantic_search(query_embedding, chunk_embeddings, top_k=top_k)
     results = [chunks[hit['corpus_id']] for hit in hits[0]]
     return results
 
-# 🔷 Generate answer using Groq Mixtral via direct API call
+# Generate answer using Groq LLaMA 3 via direct API call
 def generate_groq_answer(query, context):
-    context = context[:3000]  # Limit context to avoid input overflow
+    context = context[:3000]  # Limit context
     prompt = f"""
 You are a highly knowledgeable assistant. Use the context below to answer the user's question clearly, accurately, and in detail.
 
@@ -64,7 +64,7 @@ Answer:
         "Authorization": f"Bearer {GROQ_API_KEY}"
     }
     payload = {
-        "model": "mixtral-8x7b-instruct",
+        "model": "llama3-70b-8192",  # Updated to LLaMA 3-70B model
         "messages": [
             {"role": "user", "content": prompt}
         ]
@@ -78,8 +78,8 @@ Answer:
     data = response.json()
     return data['choices'][0]['message']['content']
 
-# 🔷 Streamlit UI
-st.title("📄 ChatPDF AI (Groq Mixtral)")
+# Streamlit UI
+st.title("📄 ChatPDF AI (Groq LLaMA 3-70B)")
 
 pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
 
